@@ -1,6 +1,6 @@
 # 🚧 Hafra.DZ (حفرة) — Carte Citoyenne des Routes Algériennes
 
-> **"Krahna mel les nids-de-poule, w amortisseurs mchaw fiha!"**  
+> **"Krahna mel hfari w trik lamharia taa chkopi surtt f djnan sfari, w amortisseurs mchaw fiha!"**  
 > An open-source, citizen-powered platform born out of sheer frustration with crater-filled roads across Algeria.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
