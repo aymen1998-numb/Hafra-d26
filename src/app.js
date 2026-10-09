@@ -145,15 +145,6 @@ const ALLOWED_MIME = new Set(['image/jpeg','image/jpg','image/png','image/webp']
 
 // Application State
 let reports = [];
-
-// GPS Routing Engine State
-let gpsActiveRouteLayers = [];
-let gpsStartCoords = null;
-let gpsEndCoords = null;
-let gpsClickSelectionMode = null;
-let gpsStartCachedAddress = "";
-let gpsEndCachedAddress = "";
-
 let confirmedIds = new Set();
 try { confirmedIds = new Set(JSON.parse(localStorage.getItem('hf_confirmed') || '[]')); } catch {}
 let showHeat = true, showMarkers = true;
@@ -280,7 +271,9 @@ window.toggleAuth = async function() {
       showToast("Connexion réussie");
     } catch (e) {
       console.warn("Connexion échouée", e);
-      if (e.code === 'auth/popup-closed-by-user' || e.message?.includes('popup')) {
+      if (e.code === 'auth/unauthorized-domain') {
+          showToast(`Domaine (${window.location.hostname}) à ajouter dans Firebase Console`, true);
+      } else if (e.code === 'auth/popup-closed-by-user' || e.message?.includes('popup')) {
           if (confirm("La pop-up a été bloquée. Voulez-vous ouvrir l'application en plein écran dans un nouvel onglet pour vous connecter ?")) {
               window.open(window.location.href, '_blank');
           }
@@ -293,12 +286,8 @@ window.toggleAuth = async function() {
 
 
 // Map
-const map = L.map('map', { center:[28, 1.66], zoom:5, minZoom:4, maxZoom:19, zoomControl:false, touchZoom: true, doubleClickZoom: true, tap: true });
-L.control.zoom({ position: 'bottomleft' }).addTo(map);
+const map = L.map('map', { center:[28, 1.66], zoom:5, minZoom:4, maxZoom:19, zoomControl:true, touchZoom: true, doubleClickZoom: true, tap: true });
 let currentTileLayer = null;
-
-const roadLayerGroup = L.layerGroup().addTo(map);
-let roads = [];
 
 let liveLocationMarker = null;
 let liveLocationCircle = null;
@@ -338,13 +327,31 @@ function startLiveTracking() {
 function setMapTiles() {
   if (currentTileLayer) map.removeLayer(currentTileLayer);
   const isLight = document.documentElement.classList.contains('light');
-  const url = isLight 
-    ? 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
-    : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
   
-  currentTileLayer = L.tileLayer(url, {
-    attribution: '© <a href="https://openstreetmap.org">OpenStreetMap</a> · © <a href="https://carto.com">CARTO</a>',
-    subdomains: 'abcd', maxZoom: 20,
+  // CARTO Basemaps API key provided by user
+  const DEFAULT_CARTO_KEY = 'cb1_4fv3_1_16595787d55cfa2bd976fe07';
+  const envKey = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_CARTO_API_KEY) || '';
+  const cartoKey = window.CARTO_API_KEY || (typeof localStorage !== 'undefined' && localStorage.getItem('CARTO_API_KEY')) || envKey || DEFAULT_CARTO_KEY;
+
+  let tileUrl = '';
+  let attribution = '';
+
+  if (cartoKey) {
+    // High-definition CARTO Voyager (light) / Dark Matter (dark) with validated API key (no watermark)
+    tileUrl = isLight 
+      ? `https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png?key=${encodeURIComponent(cartoKey)}`
+      : `https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}{r}.png?key=${encodeURIComponent(cartoKey)}`;
+    attribution = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>';
+  } else {
+    // Clean default OpenStreetMap tiles — zero watermarks, zero API key required
+    tileUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+    attribution = '&copy; <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+  }
+
+  currentTileLayer = L.tileLayer(tileUrl, {
+    attribution: attribution,
+    subdomains: 'abc', 
+    maxZoom: 19,
   }).addTo(map);
 }
 setMapTiles();
@@ -558,58 +565,22 @@ function renderMap() {
         const goodPts = reports.filter(r => r.score >= 4).map(r => [r.lat, r.lng, 1]);
         
         if (badPts.length) {
-          if (typeof L.heatLayer === 'function') {
-            heatLayer = L.heatLayer(badPts, {
-              radius: 16, blur: 10, maxZoom: 15,
-              gradient: { 0.4: '#F59E0B', 0.7: '#F97316', 1.0: '#EF4444' },
-            }).addTo(map);
-          } else {
-            console.warn("L.heatLayer is not loaded. Skipping bad status heatmap blobs.");
-          }
+          heatLayer = L.heatLayer(badPts, {
+            radius: 16, blur: 10, maxZoom: 15,
+            gradient: { 0.4: '#F59E0B', 0.7: '#F97316', 1.0: '#EF4444' },
+          }).addTo(map);
         }
         if (goodPts.length) {
-          if (typeof L.heatLayer === 'function') {
-            window.heatLayerGood = L.heatLayer(goodPts, {
-              radius: 16, blur: 10, maxZoom: 15,
-              gradient: { 0.5: '#84CC16', 1.0: '#22C55E' },
-            }).addTo(map);
-          } else {
-            console.warn("L.heatLayer is not loaded. Skipping good status heatmap blobs.");
-          }
+          window.heatLayerGood = L.heatLayer(goodPts, {
+            radius: 16, blur: 10, maxZoom: 15,
+            gradient: { 0.5: '#84CC16', 1.0: '#22C55E' },
+          }).addTo(map);
         }
       } else {
         map.once('resize', renderMap);
       }
     }
   }
-  renderRoads();
-}
-
-// Render Roads
-function renderRoads() {
-  roadLayerGroup.clearLayers();
-  roads.forEach(road => {
-    if (!road.coordinates || !road.coordinates.length) return;
-    let color = '#22C55E'; // green good
-    if (road.quality === 'average' || road.quality === 'fair') color = '#F97316'; // orange
-    else if (road.quality === 'bad') color = '#EF4444'; // red
-    
-    // Draw thick polyline with glow
-    L.polyline(road.coordinates, { color: color, weight: 12, opacity: 0.35, lineCap: 'round', lineJoin: 'round' }).addTo(roadLayerGroup);
-    const poly = L.polyline(road.coordinates, { color: color, weight: 5, opacity: 0.9, lineCap: 'round', lineJoin: 'round' }).addTo(roadLayerGroup);
-    
-    let qualityLabel = 'Bon état';
-    if (road.quality === 'average' || road.quality === 'fair') qualityLabel = 'État moyen';
-    else if (road.quality === 'bad') qualityLabel = 'Mauvais état (Dégradée)';
-
-    const popupHtml = `
-      <div style="font-family: 'Cairo', sans-serif; min-width: 160px; padding: 2px;">
-        <strong style="display: block; font-size: 13px; margin-bottom: 4px; border-bottom: 1px solid var(--bdr); padding-bottom: 4px; color: var(--txt);">${road.name || 'Route'}</strong>
-        <span style="font-size: 11px; color: ${color}; font-weight: 700;">● ${qualityLabel}</span>
-      </div>
-    `;
-    poly.bindPopup(popupHtml, { minWidth: 160 });
-  });
 }
 
 // Stats Header
@@ -623,24 +594,12 @@ function updateStats() {
   document.getElementById('h-bad').textContent = bad;
 }
 
-// Load Reports & Roads
+// Load Reports
 async function loadReports() {
   try {
     const q = query(collection(db, 'reports'), orderBy('createdAt', 'desc'), limit(500));
     const snap = await getDocs(q);
     reports = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-    try {
-      const snapRoads = await getDocs(collection(db, 'roads'));
-      roads = snapRoads.docs.map(d => {
-        const data = d.data();
-        const coords = (data.coordinates || []).map(pt => [pt.lat, pt.lng]);
-        return { id: d.id, ...data, coordinates: coords };
-      });
-    } catch (errRoads) {
-      console.warn('[hafra] Load roads failed:', errRoads);
-    }
-
     renderMap(); updateStats(); renderPanel();
   } catch (e) {
     try {
@@ -1119,28 +1078,6 @@ function clearPending() {
 }
 
 map.on('click', e => {
-  if (gpsClickSelectionMode) {
-    const lat = e.latlng.lat;
-    const lng = e.latlng.lng;
-    if (gpsClickSelectionMode === 'end') {
-      gpsEndCoords = [lat, lng];
-      document.getElementById('gps-end-input').value = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-      document.getElementById('gps-select-map-btn').classList.remove('active');
-      gpsClickSelectionMode = null;
-      showToast("Destination définie sur la carte !");
-      
-      if (window.gpsEndMarker) map.removeLayer(window.gpsEndMarker);
-      window.gpsEndMarker = L.marker([lat, lng], {
-        icon: L.divIcon({
-          className: 'gps-marker-end',
-          html: `<div style="background-color: #EF4444; width: 14px; height: 14px; border-radius: 50%; border: 2.5px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.4);"></div>`,
-          iconSize: [14, 14],
-          iconAnchor: [7, 7]
-        })
-      }).addTo(map);
-    }
-    return;
-  }
   if (!addMode) { document.getElementById('panel')?.classList.remove('open'); return; }
   setLocation(e.latlng.lat, e.latlng.lng);
   openModal();
@@ -1362,8 +1299,8 @@ window.onPhoto = function onPhoto(input) {
     const img = new Image();
     img.onload = () => {
       const canvas = document.createElement('canvas');
-      const MAX_WIDTH = 640;
-      const MAX_HEIGHT = 640;
+      const MAX_WIDTH = 800;
+      const MAX_HEIGHT = 800;
       let width = img.width;
       let height = img.height;
 
@@ -1384,19 +1321,7 @@ window.onPhoto = function onPhoto(input) {
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, width, height);
 
-      // Compress photo with 0.4 quality initial target
-      let quality = 0.4;
-      photoFile = canvas.toDataURL('image/jpeg', quality);
-
-      // Base64 size check: if string length is > 100,000 chars (approx. 75 KB)
-      // dynamically scale down to 0.2 quality to guarantee a very small payload.
-      if (photoFile.length > 100000) {
-        quality = 0.2;
-        photoFile = canvas.toDataURL('image/jpeg', quality);
-        console.log(`[hafra] Image compressed to ${Math.round(photoFile.length / 1024)} KB at quality ${quality}`);
-      } else {
-        console.log(`[hafra] Image compressed to ${Math.round(photoFile.length / 1024)} KB at quality ${quality}`);
-      }
+      photoFile = canvas.toDataURL('image/jpeg', 0.5);
 
       const prev = document.getElementById('photo-prev');
       prev.src = photoFile;
@@ -1458,7 +1383,7 @@ window.submitReport = async function submitReport() {
     comment:   sanitiseComment(rawComment) || '',
     photo_url: photo_url || '',
     submitter_email: currentUserEmail || '',
-    wilaya:    pendingLocationName || nearestWilaya(pendingLat, pendingLng),
+    wilaya:    (pendingLocationName || nearestWilaya(pendingLat, pendingLng) || 'Alger').slice(0, 48),
     votes:     0,
     status: 'active',
     createdAt: new Date().toISOString()
@@ -1766,519 +1691,3 @@ if (navigator.permissions && navigator.geolocation) {
     }
   }).catch(() => {});
 }
-
-// GPS Routing and Pavement Scoring System
-window.toggleGPS = function() {
-  const panel = document.getElementById('gps-panel');
-  const btn = document.getElementById('btn-gps');
-  if (!panel) return;
-  const isOpen = panel.classList.toggle('open');
-  if (isOpen) {
-    btn?.classList.add('active');
-    document.getElementById('panel')?.classList.remove('open');
-  } else {
-    btn?.classList.remove('active');
-    window.clearGPSRoute();
-  }
-};
-
-window.useGpsCurrentLocation = function() {
-  if (!navigator.geolocation) {
-    showToast("Géolocalisation non supportée");
-    return;
-  }
-  navigator.geolocation.getCurrentPosition((pos) => {
-    const lat = pos.coords.latitude;
-    const lng = pos.coords.longitude;
-    gpsStartCoords = [lat, lng];
-    document.getElementById('gps-start-input').value = "Ma position actuelle";
-    showToast("Position de départ définie !");
-  }, (err) => {
-    console.error("Geolocation error:", err);
-    showToast("Impossible de récupérer votre position");
-  });
-};
-
-window.enableMapClickSelection = function() {
-  gpsClickSelectionMode = 'end';
-  document.getElementById('gps-select-map-btn').classList.add('active');
-  showToast("Touchez la carte pour définir la destination");
-};
-
-async function geocode(address) {
-  try {
-    const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`);
-    const data = await res.json();
-    if (data && data.length > 0) {
-      return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
-    }
-  } catch (err) {
-    console.error("Geocoding failed:", err);
-  }
-  return null;
-}
-
-function getDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371e3; // meters
-  const phi1 = lat1 * Math.PI/180;
-  const phi2 = lat2 * Math.PI/180;
-  const deltaPhi = (lat2-lat1) * Math.PI/180;
-  const deltaLambda = (lon2-lon1) * Math.PI/180;
-  const a = Math.sin(deltaPhi/2) * Math.sin(deltaPhi/2) +
-            Math.cos(phi1) * Math.cos(phi2) *
-            Math.sin(deltaLambda/2) * Math.sin(deltaLambda/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return R * c;
-}
-
-window.clearGPSRoute = function() {
-  if (gpsActiveRouteLayers) {
-    gpsActiveRouteLayers.forEach(l => map.removeLayer(l));
-    gpsActiveRouteLayers = [];
-  }
-  if (window.gpsStartMarker) { map.removeLayer(window.gpsStartMarker); window.gpsStartMarker = null; }
-  if (window.gpsEndMarker) { map.removeLayer(window.gpsEndMarker); window.gpsEndMarker = null; }
-  const container = document.getElementById('gps-results-container');
-  if (container) container.innerHTML = '';
-};
-
-window.calculatePavedRoute = async function() {
-  const startInput = document.getElementById('gps-start-input').value;
-  const endInput = document.getElementById('gps-end-input').value;
-  
-  if (!startInput.trim() || !endInput.trim()) {
-    showToast("Veuillez remplir les deux champs");
-    return;
-  }
-  
-  const submitBtn = document.getElementById('gps-submit-btn');
-  const submitSpin = document.getElementById('gps-submit-spin');
-  const submitText = document.getElementById('gps-submit-text');
-  
-  submitBtn.disabled = true;
-  submitSpin.style.display = 'inline-block';
-  submitText.textContent = "Calcul...";
-  
-  try {
-    let startLoc = gpsStartCoords;
-    if (startInput !== "Ma position actuelle" && !startLoc) {
-      startLoc = await geocode(startInput);
-      if (!startLoc) {
-        showToast("Impossible de localiser le départ");
-        return;
-      }
-    } else if (startInput === "Ma position actuelle" && !startLoc) {
-      await new Promise((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(
-          pos => {
-            startLoc = [pos.coords.latitude, pos.coords.longitude];
-            resolve();
-          },
-          err => {
-            reject(err);
-          }
-        );
-      }).catch(() => {
-        showToast("Veuillez autoriser la géolocalisation");
-      });
-      if (!startLoc) return;
-    }
-    
-    let endLoc = gpsEndCoords;
-    if (!endLoc || (endInput !== `${gpsEndCoords[0].toFixed(5)}, ${gpsEndCoords[1].toFixed(5)}` && endInput !== gpsEndCachedAddress)) {
-      endLoc = await geocode(endInput);
-      if (!endLoc) {
-        showToast("Impossible de localiser la destination");
-        return;
-      }
-    }
-    
-    window.clearGPSRoute();
-    
-    window.gpsStartMarker = L.marker(startLoc, {
-      icon: L.divIcon({
-        className: 'gps-marker-start',
-        html: `<div style="background-color: #22C55E; width: 14px; height: 14px; border-radius: 50%; border: 2.5px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.4);"></div>`,
-        iconSize: [14, 14],
-        iconAnchor: [7, 7]
-      })
-    }).addTo(map);
-    
-    window.gpsEndMarker = L.marker(endLoc, {
-      icon: L.divIcon({
-        className: 'gps-marker-end',
-        html: `<div style="background-color: #EF4444; width: 14px; height: 14px; border-radius: 50%; border: 2.5px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.4);"></div>`,
-        iconSize: [14, 14],
-        iconAnchor: [7, 7]
-      })
-    }).addTo(map);
-    
-    const url = `https://router.project-osrm.org/route/v1/driving/${startLoc[1]},${startLoc[0]};${endLoc[1]},${endLoc[0]}?overview=full&geometries=geojson&alternatives=true`;
-    const response = await fetch(url);
-    const result = await response.json();
-    
-    if (result.code !== 'Ok' || !result.routes || result.routes.length === 0) {
-      showToast("Aucun itinéraire trouvé");
-      return;
-    }
-    
-    const scoredRoutes = result.routes.map((route, index) => {
-      const routeCoords = route.geometry.coordinates.map(pt => [pt[1], pt[0]]);
-      
-      const hitReportIds = new Set();
-      for (const report of reports) {
-        if (report.status === 'resolved' || report.status === 'fixed') continue;
-        
-        for (const routePt of routeCoords) {
-          const dist = getDistance(routePt[0], routePt[1], report.lat, report.lng);
-          if (dist < 35) {
-            hitReportIds.add(report.id);
-            break;
-          }
-        }
-      }
-      
-      let goodRoadOverlap = 0;
-      let badRoadOverlap = 0;
-      for (const road of roads) {
-        let isClose = false;
-        for (const roadPt of road.coordinates) {
-          for (const routePt of routeCoords) {
-            if (getDistance(roadPt[0], roadPt[1], routePt[0], routePt[1]) < 45) {
-              isClose = true;
-              break;
-            }
-          }
-          if (isClose) break;
-        }
-        if (isClose) {
-          if (road.quality === 'good') goodRoadOverlap++;
-          else if (road.quality === 'bad') badRoadOverlap++;
-        }
-      }
-      
-      const potholeCount = hitReportIds.size;
-      const penalty = route.distance + (potholeCount * 1200) + (badRoadOverlap * 600) - (goodRoadOverlap * 400);
-      
-      return {
-        index,
-        route,
-        coordinates: routeCoords,
-        potholeCount,
-        penalty,
-        distanceKm: (route.distance / 1000).toFixed(1),
-        durationMin: Math.ceil(route.duration / 60)
-      };
-    });
-    
-    scoredRoutes.sort((a, b) => a.penalty - b.penalty);
-    
-    const shortestRoute = [...scoredRoutes].sort((a, b) => a.route.distance - b.route.distance)[0];
-    const bestRoute = scoredRoutes[0];
-    const isDetourNecessary = bestRoute.index !== shortestRoute.index && bestRoute.potholeCount < shortestRoute.potholeCount;
-    
-    renderGPSRoutes(scoredRoutes, bestRoute, shortestRoute, isDetourNecessary);
-    renderGPSResultsUI(scoredRoutes, bestRoute, shortestRoute, isDetourNecessary);
-    
-    const allCoords = bestRoute.coordinates;
-    const bounds = L.latLngBounds(allCoords);
-    map.fitBounds(bounds, { padding: [50, 50] });
-    
-  } catch (err) {
-    console.error("GPS route calculation error:", err);
-    showToast("Erreur lors de la recherche");
-  } finally {
-    submitBtn.disabled = false;
-    submitSpin.style.display = 'none';
-    submitText.textContent = "Calculer l'itinéraire pavé";
-  }
-};
-
-function renderGPSRoutes(scoredRoutes, bestRoute, shortestRoute, isDetourNecessary) {
-  gpsActiveRouteLayers.forEach(l => map.removeLayer(l));
-  gpsActiveRouteLayers = [];
-  
-  if (isDetourNecessary) {
-    const bumpyColor = '#94A3B8';
-    const lineBumpyGlow = L.polyline(shortestRoute.coordinates, { color: '#EF4444', weight: 8, opacity: 0.15, dashArray: '5, 10' }).addTo(map);
-    const lineBumpy = L.polyline(shortestRoute.coordinates, { color: bumpyColor, weight: 4, opacity: 0.75, dashArray: '5, 8' }).addTo(map);
-    
-    gpsActiveRouteLayers.push(lineBumpyGlow, lineBumpy);
-    
-    const safeColor = '#2563EB';
-    const lineSafeGlow = L.polyline(bestRoute.coordinates, { color: safeColor, weight: 12, opacity: 0.25 }).addTo(map);
-    const lineSafe = L.polyline(bestRoute.coordinates, { color: safeColor, weight: 6, opacity: 0.95 }).addTo(map);
-    
-    gpsActiveRouteLayers.push(lineSafeGlow, lineSafe);
-  } else {
-    const safeColor = '#10B981';
-    const lineGlow = L.polyline(bestRoute.coordinates, { color: safeColor, weight: 12, opacity: 0.25 }).addTo(map);
-    const line = L.polyline(bestRoute.coordinates, { color: safeColor, weight: 6, opacity: 0.95 }).addTo(map);
-    
-    gpsActiveRouteLayers.push(lineGlow, line);
-  }
-}
-
-function renderGPSResultsUI(scoredRoutes, bestRoute, shortestRoute, isDetourNecessary) {
-  const container = document.getElementById('gps-results-container');
-  if (!container) return;
-  
-  let html = '';
-  if (isDetourNecessary) {
-    html += `
-      <div class="gps-route-card selected" onclick="window.selectRouteHighlight('safe')">
-        <span class="gps-route-badge safe">Recommandé</span>
-        <div class="gps-route-name">Voie Pavée Sécurisée</div>
-        <div class="gps-route-meta">
-          <span>📏 ${bestRoute.distanceKm} km</span>
-          <span>⏱️ ${bestRoute.durationMin} min</span>
-        </div>
-        <div class="gps-route-hazards clean">
-          <span>🛡️ ${shortestRoute.potholeCount - bestRoute.potholeCount} nids-de-poule évités !</span>
-        </div>
-        <button class="gps-go-btn" onclick="event.stopPropagation(); window.openExternalNavigation('safe')">
-          🧭 Démarrer la navigation (GPS)
-        </button>
-      </div>
-      <div class="gps-route-card" onclick="window.selectRouteHighlight('bumpy')">
-        <span class="gps-route-badge bumpy">Déconseillé</span>
-        <div class="gps-route-name">Voie la Plus Courte</div>
-        <div class="gps-route-meta">
-          <span>📏 ${shortestRoute.distanceKm} km</span>
-          <span>⏱️ ${shortestRoute.durationMin} min</span>
-        </div>
-        <div class="gps-route-hazards dirty">
-          <span>⚠️ Contient ${shortestRoute.potholeCount} nids-de-poule</span>
-        </div>
-        <button class="gps-go-btn" onclick="event.stopPropagation(); window.openExternalNavigation('bumpy')">
-          🧭 Démarrer la navigation (GPS)
-        </button>
-      </div>
-    `;
-  } else {
-    html += `
-      <div class="gps-route-card selected">
-        <span class="gps-route-badge safe">Optimal</span>
-        <div class="gps-route-name">Voie Directe (Sans Potholes)</div>
-        <div class="gps-route-meta">
-          <span>📏 ${bestRoute.distanceKm} km</span>
-          <span>⏱️ ${bestRoute.durationMin} min</span>
-        </div>
-        <div class="gps-route-hazards clean">
-          <span>✨ 0 nids-de-poule détectés</span>
-        </div>
-        <button class="gps-go-btn" onclick="event.stopPropagation(); window.openExternalNavigation('optimal')">
-          🧭 Démarrer la navigation (GPS)
-        </button>
-      </div>
-    `;
-  }
-  
-  container.innerHTML = html;
-  window.currentGpsRoutes = { bestRoute, shortestRoute, isDetourNecessary };
-}
-
-window.openExternalNavigation = function(type) {
-  const routes = window.currentGpsRoutes;
-  if (!routes) return;
-  
-  let targetRoute;
-  if (type === 'safe' || type === 'optimal') {
-    targetRoute = routes.bestRoute;
-  } else {
-    targetRoute = routes.shortestRoute;
-  }
-  
-  if (!targetRoute || !targetRoute.coordinates || targetRoute.coordinates.length < 2) {
-    showToast("Itinéraire invalide");
-    return;
-  }
-  
-  const coords = targetRoute.coordinates; // Array of [lat, lng]
-  const origin = coords[0];
-  const dest = coords[coords.length - 1];
-  
-  // Sample up to 6 waypoints from the middle of the route coordinates to guide Google Maps
-  const waypoints = [];
-  if (coords.length > 2) {
-    const numWaypoints = Math.min(6, coords.length - 2);
-    // Evenly space intermediate indices
-    const step = (coords.length - 2) / (numWaypoints + 1);
-    for (let i = 1; i <= numWaypoints; i++) {
-      const idx = Math.round(1 + i * step);
-      if (idx > 0 && idx < coords.length - 1) {
-        waypoints.push(coords[idx]);
-      }
-    }
-  }
-  
-  const originStr = `${origin[0]},${origin[1]}`;
-  const destStr = `${dest[0]},${dest[1]}`;
-  
-  let waypointStr = '';
-  if (waypoints.length > 0) {
-    waypointStr = '&waypoints=' + waypoints.map(pt => `${pt[0]},${pt[1]}`).join('|');
-  }
-  
-  const url = `https://www.google.com/maps/dir/?api=1&origin=${originStr}&destination=${destStr}${waypointStr}&travelmode=driving`;
-  window.open(url, '_blank');
-};
-
-window.selectRouteHighlight = function(type) {
-  const cards = document.querySelectorAll('.gps-route-card');
-  cards.forEach(c => c.classList.remove('selected'));
-  
-  const targetCardIdx = type === 'safe' ? 0 : 1;
-  cards[targetCardIdx]?.classList.add('selected');
-  
-  const routes = window.currentGpsRoutes;
-  if (!routes) return;
-  
-  gpsActiveRouteLayers.forEach(l => map.removeLayer(l));
-  gpsActiveRouteLayers = [];
-  
-  if (type === 'safe') {
-    const lineBumpy = L.polyline(routes.shortestRoute.coordinates, { color: '#94A3B8', weight: 3, opacity: 0.3, dashArray: '5, 8' }).addTo(map);
-    const lineSafeGlow = L.polyline(routes.bestRoute.coordinates, { color: '#2563EB', weight: 12, opacity: 0.3 }).addTo(map);
-    const lineSafe = L.polyline(routes.bestRoute.coordinates, { color: '#2563EB', weight: 7, opacity: 0.95 }).addTo(map);
-    
-    gpsActiveRouteLayers.push(lineBumpy, lineSafeGlow, lineSafe);
-  } else {
-    const lineSafe = L.polyline(routes.bestRoute.coordinates, { color: '#3B82F6', weight: 4, opacity: 0.3 }).addTo(map);
-    const lineBumpyGlow = L.polyline(routes.shortestRoute.coordinates, { color: '#EF4444', weight: 10, opacity: 0.3, dashArray: '5, 8' }).addTo(map);
-    const lineBumpy = L.polyline(routes.shortestRoute.coordinates, { color: '#EF4444', weight: 6, opacity: 0.95, dashArray: '5, 8' }).addTo(map);
-    
-    gpsActiveRouteLayers.push(lineSafe, lineBumpyGlow, lineBumpy);
-  }
-};
-
-// Debounce helper
-function debounce(func, delay) {
-  let timer;
-  return function(...args) {
-    clearTimeout(timer);
-    timer = setTimeout(() => func.apply(this, args), delay);
-  };
-}
-
-// Fetch and render search suggestions
-async function fetchSearchSuggestions(queryText, containerId, inputId) {
-  const container = document.getElementById(containerId);
-  if (!container) return;
-  
-  if (!queryText || queryText.trim().length < 3) {
-    container.innerHTML = '';
-    container.style.display = 'none';
-    return;
-  }
-  
-  try {
-    const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(queryText)}&format=json&limit=5&countrycodes=dz`);
-    const data = await res.json();
-    
-    if (data && data.length > 0) {
-      container.innerHTML = '';
-      data.forEach(item => {
-        const div = document.createElement('div');
-        div.className = 'gps-suggestion-item';
-        div.textContent = item.display_name;
-        // Keyboard focusable
-        div.tabIndex = 0;
-        
-        const selectItem = () => {
-          document.getElementById(inputId).value = item.display_name;
-          if (inputId === 'gps-start-input') {
-            gpsStartCoords = [parseFloat(item.lat), parseFloat(item.lon)];
-            gpsStartCachedAddress = item.display_name;
-          } else {
-            gpsEndCoords = [parseFloat(item.lat), parseFloat(item.lon)];
-            gpsEndCachedAddress = item.display_name;
-          }
-          container.innerHTML = '';
-          container.style.display = 'none';
-          showToast("Position sélectionnée !");
-        };
-        
-        div.addEventListener('click', selectItem);
-        div.addEventListener('keydown', e => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            selectItem();
-          }
-        });
-        container.appendChild(div);
-      });
-      container.style.display = 'block';
-    } else {
-      container.innerHTML = '<div class="gps-suggestion-item" style="color: var(--dim2); cursor: default;">Aucun résultat trouvé</div>';
-      container.style.display = 'block';
-    }
-  } catch (err) {
-    console.error("Suggestions fetch error:", err);
-  }
-}
-
-// Initialize GPS panel autocomplete suggestions
-setTimeout(() => {
-  const startInput = document.getElementById('gps-start-input');
-  const endInput = document.getElementById('gps-end-input');
-  const startSug = document.getElementById('gps-start-suggestions');
-  const endSug = document.getElementById('gps-end-suggestions');
-  
-  if (startInput) {
-    startInput.addEventListener('keydown', e => {
-      if (e.key === 'Enter') {
-        startSug.style.display = 'none';
-        window.calculatePavedRoute();
-      }
-    });
-    
-    const debouncedStart = debounce((val) => {
-      fetchSearchSuggestions(val, 'gps-start-suggestions', 'gps-start-input');
-    }, 450);
-    
-    startInput.addEventListener('input', e => {
-      if (!e.target.value.trim()) {
-        gpsStartCoords = null;
-        gpsStartCachedAddress = "";
-        startSug.style.display = 'none';
-      } else {
-        debouncedStart(e.target.value);
-      }
-    });
-  }
-  
-  if (endInput) {
-    endInput.addEventListener('keydown', e => {
-      if (e.key === 'Enter') {
-        endSug.style.display = 'none';
-        window.calculatePavedRoute();
-      }
-    });
-    
-    const debouncedEnd = debounce((val) => {
-      fetchSearchSuggestions(val, 'gps-end-suggestions', 'gps-end-input');
-    }, 450);
-    
-    endInput.addEventListener('input', e => {
-      if (!e.target.value.trim()) {
-        gpsEndCoords = null;
-        gpsEndCachedAddress = "";
-        endSug.style.display = 'none';
-      } else {
-        debouncedEnd(e.target.value);
-      }
-    });
-  }
-  
-  // Close suggestions when clicking outside
-  document.addEventListener('click', e => {
-    if (startSug && e.target !== startInput && !startSug.contains(e.target)) {
-      startSug.style.display = 'none';
-    }
-    if (endSug && e.target !== endInput && !endSug.contains(e.target)) {
-      endSug.style.display = 'none';
-    }
-  });
-}, 2000);
-

@@ -27,9 +27,10 @@ export default function App() {
           let adminSnap = await getDoc(adminRef);
           
           // Auto-bootstrap the admin based on email
-          if (!adminSnap.exists() && (currentUser.email === 'spaelfath16@gmail.com' || currentUser.email === 'admin@hafra.dz')) {
+          const emailLower = currentUser.email?.toLowerCase() || '';
+          if (!adminSnap.exists() && (emailLower === 'spaelfath16@gmail.com' || emailLower === 'admin@hafra.dz')) {
              await setDoc(adminRef, {
-                 username: "Admin",
+                 username: currentUser.displayName || "Admin",
                  role: "admin",
                  email: currentUser.email
              });

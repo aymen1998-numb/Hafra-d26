@@ -35,12 +35,12 @@
     <link rel="manifest" href="manifest.json" />
     <link
       rel="apple-touch-icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23121214'/%3E%3Ctext y='62' x='50' text-anchor='middle' font-size='32' font-family='Cairo, system-ui, -apple-system, sans-serif' font-weight='900' fill='%23FF5722'%3Eحفرة%3C/text%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23121214'/%3E%3Ctext y='70' x='50' text-anchor='middle' font-size='60'%3E🚨%3C/text%3E%3C/svg%3E"
     />
     <link
       rel="icon"
       type="image/svg+xml"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23121214'/%3E%3Ctext y='62' x='50' text-anchor='middle' font-size='32' font-family='Cairo, system-ui, -apple-system, sans-serif' font-weight='900' fill='%23FF5722'%3Eحفرة%3C/text%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23121214'/%3E%3Ctext y='70' x='50' text-anchor='middle' font-size='60'%3E🚨%3C/text%3E%3C/svg%3E"
     />
     <title>حفرة — Hafra.DZ</title>
 
@@ -125,30 +125,24 @@
         <div
           class="ptab on"
           role="tab"
-          tabindex="0"
           aria-selected="true"
           onclick="setTab('feed', this)"
-          onkeydown="if (event.key === 'Enter' || event.key === ' ') { setTab('feed', this); event.preventDefault(); }"
         >
           Fil
         </div>
         <div
           class="ptab"
           role="tab"
-          tabindex="0"
           aria-selected="false"
           onclick="setTab('stats', this)"
-          onkeydown="if (event.key === 'Enter' || event.key === ' ') { setTab('stats', this); event.preventDefault(); }"
         >
           Stats
         </div>
         <div
           class="ptab"
           role="tab"
-          tabindex="0"
           aria-selected="false"
           onclick="setTab('layers', this)"
-          onkeydown="if (event.key === 'Enter' || event.key === ' ') { setTab('layers', this); event.preventDefault(); }"
         >
           Carte
         </div>
@@ -175,48 +169,6 @@
       </div>
     </nav>
 
-    <!-- GPS PANEL -->
-    <nav id="gps-panel" class="gps-panel" aria-label="Itinéraire routier sécurisé">
-      <div class="gps-panel-top">
-        <div class="gps-title-row">
-          <div class="gps-panel-title">Routeur Évitement 🧭</div>
-          <button class="gps-close-btn" onclick="window.toggleGPS()" aria-label="Fermer le GPS">✕</button>
-        </div>
-        <div class="gps-panel-sub">Calcul d'itinéraire sans nids-de-poule</div>
-      </div>
-      
-      <div class="gps-body">
-        <div class="gps-input-group">
-          <label class="gps-label" for="gps-start-input">Départ</label>
-          <div class="gps-input-wrapper">
-            <span class="gps-input-icon">🟢</span>
-            <input type="text" id="gps-start-input" placeholder="Ma position GPS ou adresse..." autocomplete="off" />
-            <button class="gps-action-btn" onclick="window.useGpsCurrentLocation()" title="Ma position actuelle">🎯</button>
-          </div>
-          <div id="gps-start-suggestions" class="gps-suggestions-box" style="display: none;"></div>
-        </div>
-        
-        <div class="gps-input-group">
-          <label class="gps-label" for="gps-end-input">Destination</label>
-          <div class="gps-input-wrapper">
-            <span class="gps-input-icon">🔴</span>
-            <input type="text" id="gps-end-input" placeholder="Rechercher une destination..." autocomplete="off" />
-            <button class="gps-action-btn" id="gps-select-map-btn" onclick="window.enableMapClickSelection()" title="Sélectionner sur la carte">📍</button>
-          </div>
-          <div id="gps-end-suggestions" class="gps-suggestions-box" style="display: none;"></div>
-        </div>
-        
-        <button class="gps-search-btn" id="gps-submit-btn" onclick="window.calculatePavedRoute()">
-          <span class="gps-search-spin" id="gps-submit-spin" style="display:none;"></span>
-          <span id="gps-submit-text">Calculer l'itinéraire pavé</span>
-        </button>
-
-        <div id="gps-results-container" class="gps-results-container">
-          <!-- Results populated here dynamically -->
-        </div>
-      </div>
-    </nav>
-
     <!-- FAB CLUSTER -->
     <div class="fab-cluster">
       <button
@@ -225,14 +177,6 @@
         aria-label="Ma position GPS"
       >
         📍
-      </button>
-      <button
-        id="btn-gps"
-        onclick="window.toggleGPS()"
-        aria-label="Itinéraire routier évitement"
-        title="Itinéraire Évitement Potholes"
-      >
-        🧭
       </button>
       <button
         id="fab"
@@ -485,7 +429,7 @@
       role="complementary"
       aria-label="Installer l'application"
     >
-      <div id="pwa-logo" style="font-size: 16px; font-weight: 800; color: white;">حفرة</div>
+      <div id="pwa-logo">🕳</div>
       <div id="pwa-text">
         <div id="pwa-title">Installer حفرة</div>
         <div id="pwa-sub">Accès rapide depuis votre écran d'accueil</div>
@@ -507,7 +451,7 @@
         <button id="ios-tip-close" onclick="iosTipClose()" aria-label="Fermer">
           ✕
         </button>
-        <div id="ios-tip-logo" style="font-weight: 800; color: var(--acc);">حفرة</div>
+        <div id="ios-tip-logo">🕳</div>
         <div id="ios-tip-name">حفرة · Hafra.DZ</div>
         <div id="ios-tip-body">
           Pour installer l'application sur votre iPhone&nbsp;:

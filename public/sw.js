@@ -70,7 +70,7 @@ self.addEventListener('fetch', event => {
           caches.open(CACHE_APP).then(cache => cache.put(request, res.clone()));
         }
         return res;
-      });
+      }).catch(() => null);
       return cached || fetchPromise;
     })
   );

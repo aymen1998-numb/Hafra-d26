@@ -8,21 +8,23 @@ async function startServer() {
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
+    // Rewrite admin routes to /admin/index.html before vite.middlewares
+    app.use((req, res, next) => {
+      const urlPath = req.url.split('?')[0];
+      if (urlPath === '/admin' || urlPath.startsWith('/admin/')) {
+        // If not requesting a static asset file with extension (e.g. .js, .css, .tsx, .png)
+        if (!urlPath.match(/\.[a-zA-Z0-9]+$/) || urlPath.endsWith('.html')) {
+          req.url = '/admin/index.html' + (req.url.includes('?') ? '?' + req.url.split('?')[1] : '');
+        }
+      }
+      next();
+    });
+
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "mpa", // Multi-page app
     });
     app.use(vite.middlewares);
-    
-    // Fallback for admin SPA in dev
-    app.get('/admin', (req, res, next) => {
-      req.url = '/admin/index.html';
-      vite.middlewares(req, res, next);
-    });
-    app.get('/admin/*', (req, res, next) => {
-      req.url = '/admin/index.html';
-      vite.middlewares(req, res, next);
-    });
 
   } else {
     // Production serving
